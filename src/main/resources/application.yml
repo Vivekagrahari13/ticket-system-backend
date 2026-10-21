@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: ticket-system
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ticket_system
+    username: postgres
+    password: Ninja@13
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate.ddl-auto: update
+    show-sql: true
+  data:
+    web:
+      pageable:
+        default-page-size: 10
+        max-page-size: 50
+
+app:
+  jwt-secret: ${JWT_SECRET:/kim8VZvFzhyqRmMCK8SyrcZzBJDBCu77XYP44Z5U9HV1RpUTfeVNCHepgrZlJyulKuJgAxC4OJhDvEvqxvD7g==}
+  jwt-expiration-minutes: 60
+  cookie-secure: ${COOKIE_SECURE:false}
+  admin-email: ${ADMIN_EMAIL:vivek.agrahari@xcelore.com}
+  admin-password: ${ADMIN_PASSWORD:Pass@123}
+  frontend-origin: ${FRONTEND_ORIGIN:http://localhost:3000}
+
