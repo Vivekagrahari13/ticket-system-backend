@@ -4,6 +4,10 @@ import com.ticket.system.auth.dto.LoginRequest;
 import com.ticket.system.auth.dto.RegisterRequest;
 import com.ticket.system.auth.dto.UserResponse;
 import com.ticket.system.security.CustomUserDetails;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/auth")
 @RequiredArgsConstructor
 @Validated
+@Tag(name = "Auth", description = "Register, log in and out")
 public class AuthController {
 
     private final AuthService authService;
@@ -26,6 +31,13 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(registerRequest));
     }
 
+    @Operation(summary = "Log in", description = "Checks credentials and sets the token cookie",
+            security = {})   // no cookie needed to call this
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Logged in"),
+            @ApiResponse(responseCode = "400", description = "Validation failed"),
+            @ApiResponse(responseCode = "401", description = "Invalid email or password")
+    })
     @PostMapping("/login")
     public ResponseEntity<UserResponse> login(@RequestBody @Valid LoginRequest loginRequest, HttpServletResponse httpServletResponse){
         return ResponseEntity.ok(authService.login(loginRequest, httpServletResponse));
