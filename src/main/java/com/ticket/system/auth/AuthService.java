@@ -4,6 +4,7 @@ import com.ticket.system.auth.dto.LoginRequest;
 import com.ticket.system.auth.dto.RegisterRequest;
 import com.ticket.system.auth.dto.UserResponse;
 import com.ticket.system.common.exception.ConflictException;
+import com.ticket.system.common.logging.LogMasking;
 import com.ticket.system.common.exception.UnauthorizedException;
 import com.ticket.system.security.JwtAuthFilter;
 import com.ticket.system.security.JwtService;
@@ -12,6 +13,7 @@ import com.ticket.system.user.enums.Role;
 import com.ticket.system.user.repository.UserRepository;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
@@ -21,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -44,6 +47,7 @@ public class AuthService {
                 .role(Role.USER)
                 .build();
         user = userRepository.save(user);
+        log.info("User {} registered", user.getId());
         return new UserResponse(user.getId(), user.getEmail(), user.getRole());
     }
 
@@ -52,11 +56,16 @@ public class AuthService {
 
         // Same message for unknown email and wrong password, so callers can't tell which emails are registered
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new UnauthorizedException("Invalid email, user not registered"));
+                .orElseThrow(() -> {
+                    log.warn("Login failed for unknown email {}", LogMasking.maskEmail(email));
+                    return new UnauthorizedException("Invalid email, user not registered");
+                });
 
         if (!passwordEncoder.matches(request.password(), user.getPassword())) {
+            log.warn("Login failed for user {}: wrong credentials", user.getId());
             throw new UnauthorizedException("Invalid email or password");
         }
+        log.info("User {} logged in", user.getId());
 
         ResponseCookie cookie= ResponseCookie.from(JwtAuthFilter.COOKIE_NAME, jwtService.
                 generateToken(user))

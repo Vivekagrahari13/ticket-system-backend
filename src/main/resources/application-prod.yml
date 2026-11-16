@@ -1,0 +1,6 @@
+# Activated with SPRING_PROFILES_ACTIVE=prod. One JSON object per log line, so a log
+# system can search by requestId and userId. The MDC values are included automatically.
+logging:
+  structured:
+    format:
+      console: logstash

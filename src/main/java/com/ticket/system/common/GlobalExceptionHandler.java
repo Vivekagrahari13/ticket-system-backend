@@ -1,5 +1,6 @@
 package com.ticket.system.common;
 
+import com.ticket.system.common.exception.BadRequestException;
 import com.ticket.system.common.exception.ConflictException;
 import com.ticket.system.common.exception.ForbiddenException;
 import com.ticket.system.common.exception.NotFoundException;
@@ -18,6 +19,8 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+// Log levels: ERROR for our bugs (with the stack trace), WARN for security-relevant rejections,
+// INFO for expected business errors, DEBUG for noise. Messages never contain request bodies.
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -27,50 +30,66 @@ public class GlobalExceptionHandler {
         Map<String, String> errors = new LinkedHashMap<>();
         e.getBindingResult().getFieldErrors()
                 .forEach(f -> errors.putIfAbsent(f.getField(), f.getDefaultMessage()));
+        log.info("Validation failed: {}", errors);
         return build(HttpStatus.BAD_REQUEST, "Validation failed", errors);
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiError> unreadable(HttpMessageNotReadableException e) {
+        log.info("Malformed or missing request body");
+        log.debug("Body could not be read", e);
         return build(HttpStatus.BAD_REQUEST, "Malformed or missing request body", null);
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ApiError> badParameter(MethodArgumentTypeMismatchException e) {
+        log.info("Invalid value for parameter '{}'", e.getName());
         return build(HttpStatus.BAD_REQUEST, "Invalid value for '" + e.getName() + "'", null);
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ApiError> methodNotAllowed(HttpRequestMethodNotSupportedException e) {
+        log.info("Method {} not allowed", e.getMethod());
         return build(HttpStatus.METHOD_NOT_ALLOWED, "Method not allowed", null);
     }
 
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ApiError> noResource(NoResourceFoundException e) {
+        log.debug("No resource for {}", e.getResourcePath());
         return build(HttpStatus.NOT_FOUND, "Resource not found", null);
+    }
+
+    @ExceptionHandler(BadRequestException.class)
+    public ResponseEntity<ApiError> badRequest(BadRequestException e) {
+        log.info("Bad request: {}", e.getMessage());
+        return build(HttpStatus.BAD_REQUEST, e.getMessage(), null);
     }
 
     @ExceptionHandler(UnauthorizedException.class)
     public ResponseEntity<ApiError> unauthorized(UnauthorizedException e) {
+        log.warn("Unauthorized: {}", e.getMessage());
         return build(HttpStatus.UNAUTHORIZED, e.getMessage(), null);
     }
 
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<ApiError> forbidden(ForbiddenException e) {
+        log.warn("Forbidden: {}", e.getMessage());
         return build(HttpStatus.FORBIDDEN, e.getMessage(), null);
     }
 
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<ApiError> notFound(NotFoundException e) {
+        log.info("Not found: {}", e.getMessage());
         return build(HttpStatus.NOT_FOUND, e.getMessage(), null);
     }
 
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conflict(ConflictException e) {
+        log.info("Conflict: {}", e.getMessage());
         return build(HttpStatus.CONFLICT, e.getMessage(), null);
     }
 
-    // Safety net: log the real cause, never leak internals to the client
+    // Safety net: log the real cause with its stack trace, never leak internals to the client
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> unexpected(Exception e) {
         log.error("Unexpected error", e);
