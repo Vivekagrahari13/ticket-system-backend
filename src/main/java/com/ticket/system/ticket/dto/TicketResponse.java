@@ -14,6 +14,9 @@ public record TicketResponse(Long id,
                              Priority priority,
                              TicketStatus status,
                              LocalDateTime createdAt,
+                             String resolutionNote,
+                             LocalDateTime closedAt,
+                             LocalDateTime withdrawnAt,
                              UserResponse owner)
 {
     public static TicketResponse from(Ticket ticket) {
@@ -25,6 +28,9 @@ public record TicketResponse(Long id,
                 ticket.getPriority(),
                 ticket.getStatus(),
                 ticket.getCreatedAt(),
+                ticket.getResolutionNote(),
+                ticket.getClosedAt(),
+                ticket.getWithdrawnAt(),
                 new UserResponse(owner.getId(), owner.getEmail(), owner.getRole()));
     }
 }

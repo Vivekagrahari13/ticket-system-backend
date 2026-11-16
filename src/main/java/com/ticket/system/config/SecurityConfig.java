@@ -35,8 +35,9 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource(){
         CorsConfiguration config= new CorsConfiguration();
         config.setAllowedOrigins(List.of(frontendOrigin));
-        config.setAllowedMethods(List.of("GET", "POST", "PATCH","DELETE","OPTIONS"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Content-Type"));
+        config.setExposedHeaders(List.of("X-Request-Id"));
         config.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source=new UrlBasedCorsConfigurationSource();

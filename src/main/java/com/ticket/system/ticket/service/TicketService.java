@@ -1,5 +1,7 @@
 package com.ticket.system.ticket.service;
 
+import com.ticket.system.common.exception.BadRequestException;
+import com.ticket.system.common.exception.ConflictException;
 import com.ticket.system.common.exception.ForbiddenException;
 import com.ticket.system.common.exception.NotFoundException;
 import com.ticket.system.common.exception.UnauthorizedException;
@@ -7,6 +9,7 @@ import com.ticket.system.security.CustomUserDetails;
 import com.ticket.system.ticket.dto.CreateTicketRequest;
 import com.ticket.system.ticket.dto.TicketResponse;
 import com.ticket.system.ticket.dto.UpdateStatusRequest;
+import com.ticket.system.ticket.dto.UpdateTicketRequest;
 import com.ticket.system.ticket.entity.Ticket;
 import com.ticket.system.ticket.enums.TicketStatus;
 import com.ticket.system.ticket.repository.TicketRepository;
@@ -14,11 +17,15 @@ import com.ticket.system.user.entity.User;
 import com.ticket.system.user.enums.Role;
 import com.ticket.system.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class TicketService {
@@ -38,22 +45,27 @@ public class TicketService {
         ticket.setStatus(TicketStatus.OPEN);
         ticket.setOwner(owner);
 
-        return TicketResponse.from(ticketRepository.save(ticket));
+        Ticket saved = ticketRepository.save(ticket);
+        log.info("Ticket {} created by user {}", saved.getId(), me.getId());
+        return TicketResponse.from(saved);
     }
 
-    // USER sees only their own tickets, ADMIN sees all of them
+    // Everyone, admins included, sees only the tickets they raised themselves
     @Transactional(readOnly = true)
-    public Page<TicketResponse> list(TicketStatus status, Pageable pageable, CustomUserDetails me) {
-        Page<Ticket> page;
-        if (isAdmin(me)) {
-            page = (status == null)
-                    ? ticketRepository.findAll(pageable)
-                    : ticketRepository.findByStatus(status, pageable);
-        } else {
-            page = (status == null)
-                    ? ticketRepository.findByOwnerId(me.getId(), pageable)
-                    : ticketRepository.findByOwnerIdAndStatus(me.getId(), status, pageable);
-        }
+    public Page<TicketResponse> listMine(TicketStatus status, Pageable pageable, CustomUserDetails me) {
+        Page<Ticket> page = (status == null)
+                ? ticketRepository.findByOwnerId(me.getId(), pageable)
+                : ticketRepository.findByOwnerIdAndStatus(me.getId(), status, pageable);
+        return page.map(TicketResponse::from);
+    }
+
+    // Admin only: every ticket from every user
+    @Transactional(readOnly = true)
+    public Page<TicketResponse> listAll(TicketStatus status, Pageable pageable, CustomUserDetails me) {
+        requireAdmin(me, "Only admins can list all tickets");
+        Page<Ticket> page = (status == null)
+                ? ticketRepository.findAll(pageable)
+                : ticketRepository.findByStatus(status, pageable);
         return page.map(TicketResponse::from);
     }
 
@@ -67,21 +79,33 @@ public class TicketService {
         return TicketResponse.from(ticket);
     }
 
-    // Admin only
+    // Admin only. Order of checks: 403, then 400 (bad request), then 404, then 409.
     @Transactional
     public TicketResponse updateStatus(Long id, UpdateStatusRequest request, CustomUserDetails me) {
         requireAdmin(me, "Only admins can change a ticket's status");
-        Ticket ticket = findTicket(id);
-        ticket.setStatus(request.status());
-        return TicketResponse.from(ticketRepository.save(ticket));
-    }
 
-    // Admin only
-    @Transactional
-    public void delete(Long id, CustomUserDetails me) {
-        requireAdmin(me, "Only admins can delete a ticket");
+        TicketStatus next = request.status();
+        if (!next.canBeSetByAdmin()) {
+            throw new BadRequestException("Status can only be changed to IN_PROGRESS or CLOSED");
+        }
+        String note = request.resolutionNote() == null ? "" : request.resolutionNote().trim();
+        if (next == TicketStatus.CLOSED && note.isEmpty()) {
+            throw new BadRequestException("A resolution note is required when closing a ticket");
+        }
+
         Ticket ticket = findTicket(id);
-        ticketRepository.delete(ticket);
+        TicketStatus current = ticket.getStatus();
+        if (!current.canMoveTo(next)) {
+            throw new ConflictException("Cannot move a ticket from " + current + " to " + next);
+        }
+
+        ticket.setStatus(next);
+        if (next == TicketStatus.CLOSED) {
+            ticket.setResolutionNote(note);
+            ticket.setClosedAt(LocalDateTime.now());
+        }
+        log.info("Ticket {} status changed from {} to {} by admin {}", id, current, next, me.getId());
+        return TicketResponse.from(ticketRepository.save(ticket));
     }
 
     private Ticket findTicket(Long id) {
@@ -97,5 +121,42 @@ public class TicketService {
         if (!isAdmin(me)) {
             throw new ForbiddenException(message);
         }
+    }
+
+    // Owner or admin, and only while the ticket is not closed or withdrawn
+    @Transactional
+    public TicketResponse update(Long id, UpdateTicketRequest request, CustomUserDetails me) {
+        Ticket ticket = findTicket(id);
+
+        if (!isAdmin(me) && !ticket.getOwner().getId().equals(me.getId())) {
+            throw new ForbiddenException("You can't edit this ticket");
+        }
+        if (!ticket.getStatus().isEditable()) {
+            throw new ConflictException("A closed or withdrawn ticket can't be edited");
+        }
+
+        ticket.setTitle(request.title().trim());
+        ticket.setDescription(request.description().trim());
+        ticket.setPriority(request.priority());
+        log.info("Ticket {} edited by user {}", id, me.getId());
+        return TicketResponse.from(ticketRepository.save(ticket));
+    }
+
+    // Owner only, and only while the ticket is still open
+    @Transactional
+    public TicketResponse withdraw(Long id, CustomUserDetails me) {
+        Ticket ticket = findTicket(id);
+
+        if (!ticket.getOwner().getId().equals(me.getId())) {
+            throw new ForbiddenException("Only the ticket owner can withdraw a ticket");
+        }
+        if (!ticket.getStatus().canMoveTo(TicketStatus.WITHDRAWN)) {
+            throw new ConflictException("Only an open ticket can be withdrawn");
+        }
+
+        ticket.setStatus(TicketStatus.WITHDRAWN);
+        ticket.setWithdrawnAt(LocalDateTime.now());
+        log.info("Ticket {} withdrawn by owner {}", id, me.getId());
+        return TicketResponse.from(ticketRepository.save(ticket));
     }
 }
