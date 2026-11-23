@@ -1,10 +1,7 @@
 package com.ticket.system.ticket.controller;
 
 import com.ticket.system.security.CustomUserDetails;
-import com.ticket.system.ticket.dto.CreateTicketRequest;
-import com.ticket.system.ticket.dto.TicketResponse;
-import com.ticket.system.ticket.dto.UpdateStatusRequest;
-import com.ticket.system.ticket.dto.UpdateTicketRequest;
+import com.ticket.system.ticket.dto.*;
 import com.ticket.system.ticket.enums.TicketStatus;
 import com.ticket.system.ticket.service.TicketService;
 import jakarta.validation.Valid;
@@ -18,6 +15,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/tickets")
@@ -63,5 +62,10 @@ public class TicketController {
     @PostMapping("/{id}/withdraw")
     public TicketResponse withdraw(@PathVariable Long id, @AuthenticationPrincipal CustomUserDetails me) {
         return ticketService.withdraw(id, me);
+    }
+
+    @GetMapping("/{id}/history")
+    public List<TicketHistoryResponse> history(@PathVariable Long id, @AuthenticationPrincipal CustomUserDetails me) {
+        return ticketService.history(id, me);
     }
 }

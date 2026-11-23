@@ -6,10 +6,7 @@ import com.ticket.system.common.exception.ForbiddenException;
 import com.ticket.system.common.exception.NotFoundException;
 import com.ticket.system.common.exception.UnauthorizedException;
 import com.ticket.system.security.CustomUserDetails;
-import com.ticket.system.ticket.dto.CreateTicketRequest;
-import com.ticket.system.ticket.dto.TicketResponse;
-import com.ticket.system.ticket.dto.UpdateStatusRequest;
-import com.ticket.system.ticket.dto.UpdateTicketRequest;
+import com.ticket.system.ticket.dto.*;
 import com.ticket.system.ticket.entity.Ticket;
 import com.ticket.system.ticket.enums.TicketStatus;
 import com.ticket.system.ticket.repository.TicketRepository;
@@ -22,6 +19,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.ticket.system.ticket.entity.TicketStatusHistory;
+import com.ticket.system.ticket.repository.TicketStatusHistoryRepository;
+import java.util.List;
 
 import java.time.LocalDateTime;
 
@@ -32,6 +32,7 @@ public class TicketService {
 
     private final TicketRepository ticketRepository;
     private final UserRepository userRepository;
+    private final TicketStatusHistoryRepository historyRepository;
 
     @Transactional
     public TicketResponse create(CreateTicketRequest request, CustomUserDetails me) {
@@ -47,6 +48,7 @@ public class TicketService {
 
         Ticket saved = ticketRepository.save(ticket);
         log.info("Ticket {} created by user {}", saved.getId(), me.getId());
+        historyRepository.save(TicketStatusHistory.of(saved, null, TicketStatus.OPEN, owner, null));
         return TicketResponse.from(saved);
     }
 
@@ -104,6 +106,9 @@ public class TicketService {
             ticket.setResolutionNote(note);
             ticket.setClosedAt(LocalDateTime.now());
         }
+        historyRepository.save(TicketStatusHistory.of(ticket, current, next,
+                userRepository.getReferenceById(me.getId()),
+                next == TicketStatus.CLOSED ? note : null));
         log.info("Ticket {} status changed from {} to {} by admin {}", id, current, next, me.getId());
         return TicketResponse.from(ticketRepository.save(ticket));
     }
@@ -163,9 +168,23 @@ public class TicketService {
             throw new ConflictException("Only an open ticket can be withdrawn");
         }
 
+        TicketStatus current = ticket.getStatus();
         ticket.setStatus(TicketStatus.WITHDRAWN);
         ticket.setWithdrawnAt(LocalDateTime.now());
+        historyRepository.save(TicketStatusHistory.of(ticket, current, TicketStatus.WITHDRAWN,
+                userRepository.getReferenceById(me.getId()), null));
         log.info("Ticket {} withdrawn by owner {}", id, me.getId());
         return TicketResponse.from(ticketRepository.save(ticket));
+    }
+
+    @Transactional(readOnly = true)
+    public List<TicketHistoryResponse> history(Long id, CustomUserDetails me) {
+        Ticket ticket = findTicket(id);
+        if (!isAdmin(me) && !ticket.getOwner().getId().equals(me.getId())) {
+            throw new ForbiddenException("You can't view this ticket's history");
+        }
+        return historyRepository.findByTicketIdOrderByCreatedAtAscIdAsc(id).stream()
+                .map(TicketHistoryResponse::from)
+                .toList();
     }
 }
