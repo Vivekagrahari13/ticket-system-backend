@@ -44,4 +44,7 @@ public class Ticket extends GenericEntity {
 
     @Column(name = "withdrawn_at")
     private LocalDateTime withdrawnAt;
+
+    @Version
+    private Long version;
 }

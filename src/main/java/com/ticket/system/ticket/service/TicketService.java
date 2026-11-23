@@ -128,6 +128,15 @@ public class TicketService {
     public TicketResponse update(Long id, UpdateTicketRequest request, CustomUserDetails me) {
         Ticket ticket = findTicket(id);
 
+        // TEMP-REPRO: For testing purpose
+//        log.info("TEMP-REPRO: loaded ticket {} with status {}, sleeping 10s", id, ticket.getStatus());
+//        try {
+//            Thread.sleep(10_000);
+//        } catch (InterruptedException e) {
+//            Thread.currentThread().interrupt();
+//        }
+        // END TEMP-REPRO
+
         if (!isAdmin(me) && !ticket.getOwner().getId().equals(me.getId())) {
             throw new ForbiddenException("You can't edit this ticket");
         }
