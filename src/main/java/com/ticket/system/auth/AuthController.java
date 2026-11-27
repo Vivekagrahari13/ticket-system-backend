@@ -3,11 +3,14 @@ package com.ticket.system.auth;
 import com.ticket.system.auth.dto.LoginRequest;
 import com.ticket.system.auth.dto.RegisterRequest;
 import com.ticket.system.auth.dto.UserResponse;
+import com.ticket.system.auth.ratelimit.TokenBucketLimiter;
+import com.ticket.system.common.exception.TooManyRequestsException;
 import com.ticket.system.security.CustomUserDetails;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -25,7 +28,7 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final AuthService authService;
-
+    private final TokenBucketLimiter tokenBucketLimiter;
     @PostMapping("/register")
     public ResponseEntity<UserResponse> register(@RequestBody @Valid RegisterRequest registerRequest){
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(registerRequest));
@@ -39,7 +42,12 @@ public class AuthController {
             @ApiResponse(responseCode = "401", description = "Invalid email or password")
     })
     @PostMapping("/login")
-    public ResponseEntity<UserResponse> login(@RequestBody @Valid LoginRequest loginRequest, HttpServletResponse httpServletResponse){
+    public ResponseEntity<UserResponse> login(@RequestBody @Valid LoginRequest loginRequest, HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse){
+        var decision=tokenBucketLimiter.tryAcquire(httpServletRequest.getRemoteAddr());
+        if(!decision.allowed()){
+            throw new TooManyRequestsException("Too many login attempts. Please try again later.",
+                    decision.retryAfterSeconds());
+        }
         return ResponseEntity.ok(authService.login(loginRequest, httpServletResponse));
 
     }

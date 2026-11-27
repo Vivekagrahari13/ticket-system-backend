@@ -1,10 +1,6 @@
 package com.ticket.system.common;
 
-import com.ticket.system.common.exception.BadRequestException;
-import com.ticket.system.common.exception.ConflictException;
-import com.ticket.system.common.exception.ForbiddenException;
-import com.ticket.system.common.exception.NotFoundException;
-import com.ticket.system.common.exception.UnauthorizedException;
+import com.ticket.system.common.exception.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
@@ -14,8 +10,10 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.http.HttpHeaders;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -106,5 +104,13 @@ public class GlobalExceptionHandler {
         log.warn("Optimistic lock conflict: {}", e.getMessage());
         return build(HttpStatus.CONFLICT,
                 "This ticket was changed by someone else. Please reload and try again.", null);
+    }
+
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<ApiError> tooManyRequests(TooManyRequestsException e) {
+        log.warn("Rate limit hit: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.getRetryAfterSeconds()))
+                .body(ApiError.of(HttpStatus.TOO_MANY_REQUESTS.value(), e.getMessage(), null));
     }
 }

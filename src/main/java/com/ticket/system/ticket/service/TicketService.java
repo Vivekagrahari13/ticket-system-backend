@@ -7,23 +7,32 @@ import com.ticket.system.common.exception.NotFoundException;
 import com.ticket.system.common.exception.UnauthorizedException;
 import com.ticket.system.security.CustomUserDetails;
 import com.ticket.system.ticket.dto.*;
+import com.ticket.system.ticket.entity.IdempotencyRecord;
 import com.ticket.system.ticket.entity.Ticket;
 import com.ticket.system.ticket.enums.TicketStatus;
+import com.ticket.system.ticket.repository.IdempotencyRepository;
 import com.ticket.system.ticket.repository.TicketRepository;
 import com.ticket.system.user.entity.User;
 import com.ticket.system.user.enums.Role;
 import com.ticket.system.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.ticket.system.ticket.entity.TicketStatusHistory;
 import com.ticket.system.ticket.repository.TicketStatusHistoryRepository;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 @Slf4j
 @Service
@@ -33,9 +42,24 @@ public class TicketService {
     private final TicketRepository ticketRepository;
     private final UserRepository userRepository;
     private final TicketStatusHistoryRepository historyRepository;
+    private final IdempotencyRepository idempotencyRepository;
 
     @Transactional
-    public TicketResponse create(CreateTicketRequest request, CustomUserDetails me) {
+    public TicketResponse create(CreateTicketRequest request, String idempotencyKey, CustomUserDetails me) {
+        String key = cleanKey(idempotencyKey);
+        String hash = hashOf(request);
+
+        if (key != null) {
+            Optional<IdempotencyRecord> seen = idempotencyRepository.findByUserIdAndIdemKey(me.getId(), key);
+            if (seen.isPresent()) {
+                if (!seen.get().getRequestHash().equals(hash)) {
+                    throw new BadRequestException("This Idempotency-Key was already used with a different request");
+                }
+                log.info("Idempotent replay of key {}: returning ticket {}", key, seen.get().getTicketId());
+                return TicketResponse.from(findTicket(seen.get().getTicketId()));
+            }
+        }
+
         User owner = userRepository.findById(me.getId())
                 .orElseThrow(() -> new UnauthorizedException("User no longer exists"));
 
@@ -47,9 +71,38 @@ public class TicketService {
         ticket.setOwner(owner);
 
         Ticket saved = ticketRepository.save(ticket);
-        log.info("Ticket {} created by user {}", saved.getId(), me.getId());
         historyRepository.save(TicketStatusHistory.of(saved, null, TicketStatus.OPEN, owner, null));
+
+        if (key != null) {
+            try {
+                // flush now, so the unique constraint is checked here and not at commit time
+                idempotencyRepository.saveAndFlush(IdempotencyRecord.of(me.getId(), key, hash, saved.getId()));
+            } catch (DataIntegrityViolationException e) {
+                // another request with the same key won the race; this transaction rolls back
+                throw new ConflictException("A request with this Idempotency-Key is already being processed. Retry in a moment.");
+            }
+        }
+        log.info("Ticket {} created by user {}", saved.getId(), me.getId());
         return TicketResponse.from(saved);
+    }
+
+    private String cleanKey(String key) {
+        if (key == null) return null;
+        String k = key.trim();
+        if (k.isEmpty() || k.length() > 100) {
+            throw new BadRequestException("Idempotency-Key must be 1 to 100 characters");
+        }
+        return k;
+    }
+
+    private String hashOf(CreateTicketRequest r) {
+        String text = r.title().trim() + "\n" + r.description().trim() + "\n" + r.priority();
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     // Everyone, admins included, sees only the tickets they raised themselves

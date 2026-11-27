@@ -28,8 +28,9 @@ public class TicketController {
 
     @PostMapping
     public ResponseEntity<TicketResponse> create(@RequestBody @Valid CreateTicketRequest request,
+                                                 @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
                                                  @AuthenticationPrincipal CustomUserDetails me) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(ticketService.create(request, me));
+        return ResponseEntity.status(HttpStatus.CREATED).body(ticketService.create(request,idempotencyKey, me));
     }
 
     @GetMapping
